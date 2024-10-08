@@ -4,8 +4,8 @@
     "main": "App.js",
     "devDependencies": {},
     "scripts": {
-        "test": "echo \"Error: no test specified\" && exit 1",
-        "start": "node server.js"
+        "dev": "nodemon index.ts",
+        "start": "node index.js"
     },
     "dependencies": {
         "cors": "^2.8.5",
