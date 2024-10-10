@@ -3,6 +3,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const scheduleRoutes = require('./routes/scheduleRoutes.js');
+const holidayroute = require('./routes/holidayroute.js');
 require('dotenv').config();
 
 const app = express();
@@ -22,6 +23,7 @@ app.get('/', (req, res) => {
 
 // Use schedule routes
 app.use('/api/schedule', scheduleRoutes);
+app.use('/api/holiday', holidayroute);
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
