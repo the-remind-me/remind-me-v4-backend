@@ -28,7 +28,6 @@ const scheduleSchema = new mongoose.Schema({
     Thursday: [classSchema],
     Friday: [classSchema],
     Saturday: [classSchema],
-    Sunday: [classSchema]
   }
 },
   {
