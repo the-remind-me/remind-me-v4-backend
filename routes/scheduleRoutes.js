@@ -1,7 +1,8 @@
 // routes/scheduleRoutes.js
-const express = require('express');
+import express from 'express';
+import Schedule from '../models/Schedule.js';
+
 const router = express.Router();
-const Schedule = require('../models/Schedule.js');
 
 // Add or update a schedule
 router.post('/add', async (req, res) => {
@@ -69,4 +70,4 @@ router.delete('/delete/:id', async (req, res) => {
     }
 })
 
-module.exports = router;
+export default router;

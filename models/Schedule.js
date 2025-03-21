@@ -1,7 +1,7 @@
 // models/Schedule.js
-const mongoose = require('mongoose');
+import mongoose, { Schema } from 'mongoose';
 
-const classSchema = new mongoose.Schema({
+const classSchema = new Schema({
   Period: Number,
   Start_Time: String,
   End_Time: String,
@@ -15,7 +15,7 @@ const classSchema = new mongoose.Schema({
   Class_type: String,
 });
 
-const scheduleSchema = new mongoose.Schema({
+const scheduleSchema = new Schema({
   ID: { type: String, required: true, unique: true },
   semester: { type: String, required: true },
   program: { type: String, required: true },
@@ -36,4 +36,4 @@ const scheduleSchema = new mongoose.Schema({
 
 const Schedule = mongoose.model('Schedule', scheduleSchema);
 
-module.exports = Schedule;
+export default Schedule;

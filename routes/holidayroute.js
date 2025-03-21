@@ -1,6 +1,7 @@
-const express = require('express');
+import express from 'express';
+import Holiday from '../models/holiday.js';
+
 const router = express.Router();
-const Holiday = require('../models/holiday.js');
 
 // Add or update a holiday
 router.post('/add', async (req, res) => {
@@ -46,4 +47,4 @@ router.delete('/delete/:id', async (req, res) => {
     }
 });
 
-module.exports = router;
+export default router;
