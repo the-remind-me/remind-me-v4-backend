@@ -3,12 +3,12 @@ import mongoose, { Schema } from 'mongoose';
 
 const classSchema = new Schema({
   Period: Number,
-  Start_Time: String,
-  End_Time: String,
+  Start_Time: { type: String, match: /^\d{2}:\d{2}$/ }, // HH:MM (24-hour)
+  End_Time: { type: String, match: /^\d{2}:\d{2}$/ }, // HH:MM (24-hour)
   Course_Name: String,
   Instructor: String,
-  Building: String,
-  Room: String,
+  Building: String, // e.g., "VI", "Main"
+  Room: String, // e.g., "301", "Lab 2"
   Group: {
     type: String,
     enum: ['Group 1', 'Group 2', 'All'],
@@ -18,8 +18,12 @@ const classSchema = new Schema({
   Class_type: {
     type: String,
     enum: ['Theory', 'Lab', 'Extra', 'Seminar', 'Free'],
+    required: true,
   },
-});
+},
+  { _id: false }, // Disable automatic _id generation for subdocuments
+);
+
 
 const scheduleSchema = new Schema({
   ID: { type: String, required: true, unique: true },
