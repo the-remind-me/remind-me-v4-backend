@@ -39,43 +39,89 @@ async function uploadToGemini(path, mimeType) {
 }
 
 /**
- * Waits for the given files to be active.
+ * Waits for the given files to be active with progress updates.
  */
-async function waitForFilesActive(files) {
+async function waitForFilesActive(files, res) {
     console.log("Waiting for file processing...");
+    res.write(`data: ${JSON.stringify({ status: "processing", message: "Processing PDF file..." })}\n\n`);
+
     for (const name of files.map((file) => file.name)) {
         let file = await fileManager.getFile(name);
+        let dotCount = 0;
+
         while (file.state === "PROCESSING") {
-            process.stdout.write(".")
-            await new Promise((resolve) => setTimeout(resolve, 10_000));
-            file = await fileManager.getFile(name)
+            dotCount = (dotCount + 1) % 4;
+            process.stdout.write(".");
+            res.write(`data: ${JSON.stringify({
+                status: "processing",
+                message: `Processing PDF${".".repeat(dotCount)}`
+            })}\n\n`);
+
+            await new Promise((resolve) => setTimeout(resolve, 5000));
+            file = await fileManager.getFile(name);
         }
+
         if (file.state !== "ACTIVE") {
+            res.write(`data: ${JSON.stringify({
+                status: "error",
+                message: `File ${file.name} failed to process`
+            })}\n\n`);
             throw Error(`File ${file.name} failed to process`);
         }
     }
+
     console.log("...all files ready\n");
+    res.write(`data: ${JSON.stringify({
+        status: "processed",
+        message: "PDF processed successfully"
+    })}\n\n`);
 }
 
 /**
  * POST /api/extract-pdf
- * Extract content from PDF using Gemini API
+ * Extract content from PDF using Gemini API with real-time updates
  */
 router.post("/extract-pdf", upload.single("pdf"), async (req, res) => {
+    // Set headers for SSE
+    res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*'
+    });
+
     try {
         if (!req.file) {
-            return res.status(400).json({ success: false, message: "No PDF file uploaded" });
+            res.write(`data: ${JSON.stringify({
+                status: "error",
+                message: "No PDF file uploaded"
+            })}\n\n`);
+            res.end();
+            return;
         }
 
         const filePath = req.file.path;
+        res.write(`data: ${JSON.stringify({
+            status: "uploading",
+            message: "Uploading PDF to processing server..."
+        })}\n\n`);
 
         // Upload to Gemini
         const uploadedFile = await uploadToGemini(filePath, "application/pdf");
+        res.write(`data: ${JSON.stringify({
+            status: "uploaded",
+            message: "PDF uploaded successfully"
+        })}\n\n`);
 
-        // Wait for file processing
-        await waitForFilesActive([uploadedFile]);
+        // Wait for file processing with status updates
+        await waitForFilesActive([uploadedFile], res);
 
         // Initialize model with system instructions
+        res.write(`data: ${JSON.stringify({
+            status: "analyzing",
+            message: "Analyzing PDF content..."
+        })}\n\n`);
+
         const model = genAI.getGenerativeModel({
             model: "gemini-2.5-pro-exp-03-25",
             systemInstruction: fs.readFileSync("prompt.txt", "utf-8"),
@@ -91,6 +137,11 @@ router.post("/extract-pdf", upload.single("pdf"), async (req, res) => {
         };
 
         // Start chat session with the PDF
+        res.write(`data: ${JSON.stringify({
+            status: "extracting",
+            message: "Extracting information from PDF..."
+        })}\n\n`);
+
         const chatSession = model.startChat({
             generationConfig,
             history: [
@@ -115,13 +166,25 @@ router.post("/extract-pdf", upload.single("pdf"), async (req, res) => {
         // Clean up temporary file
         fs.unlinkSync(filePath);
         const cleanedText = extractedText.replace(/```json/g, "").replace(/```/g, "");
+
         // Parse JSON if possible and return
         try {
             const jsonData = JSON.parse(cleanedText);
-            return res.status(200).json(jsonData);
-        } catch {
-            return res.status(200).json(cleanedText);
+            res.write(`data: ${JSON.stringify({
+                status: "complete",
+                message: "PDF extraction completed successfully",
+                data: jsonData
+            })}\n\n`);
+        } catch (error) {
+            res.write(`data: ${JSON.stringify({
+                status: "complete",
+                message: "PDF extraction completed successfully",
+                data: cleanedText
+            })}\n\n`);
         }
+
+        // End the SSE stream
+        res.end();
 
     } catch (error) {
         console.error("PDF extraction error:", error);
@@ -131,11 +194,12 @@ router.post("/extract-pdf", upload.single("pdf"), async (req, res) => {
             fs.unlinkSync(req.file.path);
         }
 
-        return res.status(500).json({
-            success: false,
-            message: "Failed to extract PDF content",
-            error: error.message
-        });
+        res.write(`data: ${JSON.stringify({
+            status: "error",
+            message: `Failed to extract PDF content: ${error.message}`
+        })}\n\n`);
+
+        res.end();
     }
 });
 
