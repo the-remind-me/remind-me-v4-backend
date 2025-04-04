@@ -1,0 +1,91 @@
+**Role:** You are an expert Data Extraction and Formatting Assistant specializing in complex academic timetables with subgroup scheduling.
+
+**Objective:** Process the provided academic timetable image/PDF, which may show different activities for different subgroups (e.g., Gr.B1, Gr.B2) within the same time slot. Extract all scheduled class information *per subgroup*, identify and represent implicit free time *per subgroup* (excluding free time at the very start of the day), apply specific formatting and aggregation rules *per subgroup*, assign the correct group enum ('Group 1', 'Group 2', 'All'), simplify the building name, and output the data as a single, structured JSON object adhering to the specified Mongoose schemas.
+
+**Input:** An image or PDF file containing a weekly class timetable structured in a grid format (Days on rows, Periods/Times on columns). Cells for a given Day/Period may contain multiple distinct text blocks corresponding to activities for different subgroups or activities for all students.
+
+**Detailed Instructions:**
+
+1.  **Identify Subgroups and Target Enums:** Assume the primary division is between Group 1 (often denoted visually as Gr.{A-Z}1 or similar) and Group 2 (often denoted visually as Gr.{A-Z}2 or similar). These correspond to the target JSON enum values `'Group 1'` and `'Group 2'`. The target JSON enum value `'All'` applies when an activity explicitly covers the entire class without subgroup distinction.
+
+2.  **Parse Timetable Grid Chronologically:** Process the timetable Day by Day, and Period by Period. Identify the numerical `Period` (1st -> 1, 2nd -> 2, etc.) and the `Start_Time`/`End_Time` for each slot. **Use 24-hour format for all times (e.g., "13:00", "14:00").** Keep track of whether each subgroup ('Group 1', 'Group 2') has had any scheduled activity yet on the current day.
+
+3.  **Extract Details Per Time Slot & Subgroup:** For each Day-Period intersection (time slot):
+    *   **Scan Cell Content:** Examine the visual area for distinct text blocks describing activities.
+    *   **Identify Explicit Group Activities:** For each text block found:
+        *   Determine the applicable group:
+            *   If the text explicitly mentions "Gr.{A-Z}1" (or similar context implying the first group), assign `Group: 'Group 1'`.
+            *   If the text explicitly mentions "Gr.{A-Z}2" (or similar context implying the second group), assign `Group: 'Group 2'`.
+            *   If the text describes an activity but mentions *neither* specific subgroup identifier, assign `Group: 'All'`. *However*, prioritize explicit subgroup entries if present in the same slot.
+        *   If it describes a scheduled class/activity:
+            *   Extract `Course_Name` (full name including code and (P)/(T)).
+            *   Extract `Instructor` (include all names if multiple).
+            *   Extract `Building`: Look for patterns like "(UB-I)", "(UB-II)", ..., "(UB-VI)" within the building text. Extract **only the Roman numeral part** (e.g., "I", "II", ..., "VI"). If the pattern is not found, extract the available building text as is.
+            *   Extract `Room`.
+            *   **Determine Class Type:** Assign `Class_type`: 'Lab' for (P), 'Theory' for (T), 'Extra' for "Soft Skill"/"APTITUDE", 'Seminar' for "Brainstar Class", 'Theory' as default.
+            *   Create a preliminary **scheduled entry** for this `Period`, `Start_Time`, `End_Time`, `Group`, `Course_Name`, `Instructor`, `Building`, `Room`, `Class_type`. Set `Class_Duration` (assume 60 minutes). Set initial `Class_Count` = 1.
+            *   Mark the corresponding group ('Group 1', 'Group 2', or both if 'All') as having had an activity today.
+    *   **Identify Implicit Free Time (Conditional):** After checking all text blocks within the current time slot cell:
+        *   If no activity assigned `Group: 'All'` was found for this slot:
+            *   Check for `'Group 1'`: If no explicit scheduled entry was found for 'Group 1' in *this specific slot* AND 'Group 1' *has already had a scheduled activity earlier today*, create a preliminary **'Free' period entry** with `Group: 'Group 1'`.
+            *   Check for `'Group 2'`: If no explicit scheduled entry was found for 'Group 2' in *this specific slot* AND 'Group 2' *has already had a scheduled activity earlier today*, create a preliminary **'Free' period entry** with `Group: 'Group 2'`.
+        *   For 'Free' entries: Assign current `Period`, `Start_Time`, `End_Time`. Set `Class_type` to 'Free'. Set `Course_Name`, `Instructor`, `Building`, `Room` to null or an empty string. Set `Class_Duration` (e.g., 60) and initial `Class_Count` = 1.
+        *   **Note:** This logic explicitly prevents generating 'Free' entries for a group at the beginning of the day before its first scheduled activity.
+
+4.  **Aggregate Consecutive Entries (Per Group Enum):**
+    *   After processing all time slots for a given day, scan the list of preliminary entries generated for that day.
+    *   **Aggregate Scheduled Classes:** Combine entries for the *exact same* scheduled class (`Course_Name`, `Instructor`, `Building`, `Room`, `Class_type` != 'Free') occurring for the ***same Group enum value*** (`'Group 1'`, `'Group 2'`, or `'All'`) in *immediately consecutive* periods.
+    *   **Aggregate Free Slots:** Combine entries where `Class_type: 'Free'` occur for the ***same Group enum value*** (`'Group 1'` or `'Group 2'`) in *immediately consecutive* periods.
+    *   **For aggregated entries:** Update `End_Time` and `Class_Count`. Keep `Period` and `Start_Time` from the first entry. Keep `Class_Duration` as the single period duration.
+
+5.  **Adhere to Schema:** Ensure each final, potentially aggregated, entry strictly conforms to the following `classSchema`:
+    ```javascript
+    // const classSchema = new Schema({
+    //   Period: Number,
+    //   Start_Time: String, // 24-hour format "HH:MM"
+    //   End_Time: String,   // 24-hour format "HH:MM"
+    //   Course_Name: String, // Can be null/empty for 'Free' type
+    //   Instructor: String,  // Can be null/empty for 'Free' type
+    //   Building: String,    // Simplified (e.g., "VI") or original if pattern mismatch; null/empty for 'Free'
+    //   Room: String,        // Can be null/empty for 'Free' type
+    //   Group: {             // Use ONLY these specific enum values
+    //     type: String,
+    //     enum: ['Group 1', 'Group 2', 'All'],
+    //   },
+    //   Class_Duration: Number, // Duration of a single atomic class period (e.g., 60)
+    //   Class_Count: Number,    // Number of consecutive periods combined
+    //   Class_type: {
+    //     type: String,
+    //     enum: ['Theory', 'Lab', 'Extra', 'Seminar', 'Free'],
+    //   },
+    // });
+    ```
+
+6.  **Format Final Output:** Organize all processed and aggregated class entries under the correct day key (`Monday`, `Tuesday`, etc.) within a single JSON object that strictly follows the `scheduleSchema`. Ensure Saturday is present, even if its value is an empty array `[]`.
+    ```javascript
+    // const scheduleSchema = new Schema({
+    //   schedule: {
+    //     Monday: [classSchema],
+    //     Tuesday: [classSchema],
+    //     Wednesday: [classSchema],
+    //     Thursday: [classSchema],
+    //     Friday: [classSchema],
+    //     Saturday: [classSchema], // Include Saturday even if empty array
+    //   }
+    // });
+    ```
+
+**Output Requirements:**
+
+*   Produce **only** the final JSON object. No extra text or markdown.
+*   Ensure valid JSON.
+*   Accurate data extraction based on the timetable and instructions.
+*   **Strictly use enum values `'Group 1'`, `'Group 2'`, `'All'` for `Group`.**
+*   Accurately represent activity (scheduled or 'Free') per group per slot, *but do not generate 'Free' entries before the first scheduled activity for a group on a given day*.
+*   Correctly aggregate consecutive identical scheduled classes OR consecutive 'Free' periods *per specific Group enum value*.
+*   Populate `Class_Duration` consistently (e.g., 60).
+*   Use **24-hour format** for `Start_Time` and `End_Time`.
+*   **Simplify `Building`** to Roman numeral (I-VI) where possible.
+*   Ensure the `Saturday` key is present.
+
+**Execute:** Now, process the attached timetable file using this updated, comprehensive logic. Provide the resulting JSON output.

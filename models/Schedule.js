@@ -9,10 +9,16 @@ const classSchema = new Schema({
   Instructor: String,
   Building: String,
   Room: String,
-  Group: String,
+  Group: {
+    type: String,
+    enum: ['Group 1', 'Group 2', 'All'],
+  },
   Class_Duration: Number,
   Class_Count: Number,
-  Class_type: String,
+  Class_type: {
+    type: String,
+    enum: ['Theory', 'Lab', 'Extra', 'Seminar', 'Free'],
+  },
 });
 
 const scheduleSchema = new Schema({
