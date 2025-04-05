@@ -43,28 +43,37 @@ async function uploadToGemini(path, mimeType) {
  */
 async function waitForFilesActive(files, res) {
     console.log("Waiting for file processing...");
-    res.write(`data: ${JSON.stringify({ status: "processing", message: "Processing PDF file..." })}\n\n`);
+    res.write(`data: ${JSON.stringify({ status: "processing", message: "Processing PDF file...", progress: 10 })}\n\n`);
 
     for (const name of files.map((file) => file.name)) {
         let file = await fileManager.getFile(name);
         let dotCount = 0;
+        let progressPercent = 15;
+        let progressStep = Math.floor(40 / (files.length * 3)); // Distribute progress from 15-55%
 
         while (file.state === "PROCESSING") {
             dotCount = (dotCount + 1) % 4;
             process.stdout.write(".");
+            
+            // Increment progress for real-time feeling
+            progressPercent = Math.min(55, progressPercent + progressStep);
+            
             res.write(`data: ${JSON.stringify({
                 status: "processing",
-                message: `Processing PDF${".".repeat(dotCount)}`
+                message: `Processing PDF${".".repeat(dotCount)}`,
+                progress: progressPercent,
+                detail: `Parsing page structures and content...`
             })}\n\n`);
 
-            await new Promise((resolve) => setTimeout(resolve, 5000));
+            await new Promise((resolve) => setTimeout(resolve, 2000)); // Reduced wait time for more updates
             file = await fileManager.getFile(name);
         }
 
         if (file.state !== "ACTIVE") {
             res.write(`data: ${JSON.stringify({
                 status: "error",
-                message: `File ${file.name} failed to process`
+                message: `File ${file.name} failed to process`,
+                progress: 0
             })}\n\n`);
             throw Error(`File ${file.name} failed to process`);
         }
@@ -73,7 +82,9 @@ async function waitForFilesActive(files, res) {
     console.log("...all files ready\n");
     res.write(`data: ${JSON.stringify({
         status: "processed",
-        message: "PDF processed successfully"
+        message: "PDF processed successfully",
+        progress: 60,
+        detail: "Document structure analysis complete"
     })}\n\n`);
 }
 
@@ -87,14 +98,23 @@ router.post("/extract-pdf", upload.single("pdf"), async (req, res) => {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
         'Connection': 'keep-alive',
-        'Access-Control-Allow-Origin': '*'
+        'Access-Control-Allow-Origin': '*',
+        'X-Accel-Buffering': 'no' // Disable proxy buffering for Nginx
     });
+
+    // Send initial connection established event
+    res.write(`data: ${JSON.stringify({
+        status: "connected",
+        message: "Connection established",
+        progress: 0
+    })}\n\n`);
 
     try {
         if (!req.file) {
             res.write(`data: ${JSON.stringify({
                 status: "error",
-                message: "No PDF file uploaded"
+                message: "No PDF file uploaded",
+                progress: 0
             })}\n\n`);
             res.end();
             return;
@@ -103,14 +123,18 @@ router.post("/extract-pdf", upload.single("pdf"), async (req, res) => {
         const filePath = req.file.path;
         res.write(`data: ${JSON.stringify({
             status: "uploading",
-            message: "Uploading PDF to processing server..."
+            message: "Uploading PDF to processing server...",
+            progress: 5,
+            detail: "Preparing document for analysis"
         })}\n\n`);
 
         // Upload to Gemini
         const uploadedFile = await uploadToGemini(filePath, "application/pdf");
         res.write(`data: ${JSON.stringify({
             status: "uploaded",
-            message: "PDF uploaded successfully"
+            message: "PDF uploaded successfully",
+            progress: 10,
+            detail: "Document uploaded to AI processing engine"
         })}\n\n`);
 
         // Wait for file processing with status updates
@@ -119,7 +143,9 @@ router.post("/extract-pdf", upload.single("pdf"), async (req, res) => {
         // Initialize model with system instructions
         res.write(`data: ${JSON.stringify({
             status: "analyzing",
-            message: "Analyzing PDF content..."
+            message: "Analyzing PDF content...",
+            progress: 65,
+            detail: "Identifying key information and document structure"
         })}\n\n`);
 
         const model = genAI.getGenerativeModel({
@@ -139,8 +165,20 @@ router.post("/extract-pdf", upload.single("pdf"), async (req, res) => {
         // Start chat session with the PDF
         res.write(`data: ${JSON.stringify({
             status: "extracting",
-            message: "Extracting information from PDF..."
+            message: "Extracting information from PDF...",
+            progress: 75,
+            detail: "Processing document content with AI"
         })}\n\n`);
+
+        // Add intermediate progress update
+        setTimeout(() => {
+            res.write(`data: ${JSON.stringify({
+                status: "extracting",
+                message: "Extracting information from PDF...",
+                progress: 85,
+                detail: "Formatting extracted data"
+            })}\n\n`);
+        }, 2000);
 
         const chatSession = model.startChat({
             generationConfig,
@@ -160,6 +198,13 @@ router.post("/extract-pdf", upload.single("pdf"), async (req, res) => {
         });
 
         // Send extraction prompt
+        res.write(`data: ${JSON.stringify({
+            status: "finalizing",
+            message: "Finalizing extraction...",
+            progress: 90,
+            detail: "Generating structured data from document"
+        })}\n\n`);
+        
         const result = await chatSession.sendMessage("Dont cover it with ```json ```");
         const extractedText = result.response.text();
 
@@ -173,13 +218,18 @@ router.post("/extract-pdf", upload.single("pdf"), async (req, res) => {
             res.write(`data: ${JSON.stringify({
                 status: "complete",
                 message: "PDF extraction completed successfully",
+                progress: 100,
+                detail: "All data extracted and processed",
                 data: jsonData
             })}\n\n`);
         } catch (error) {
             res.write(`data: ${JSON.stringify({
                 status: "complete",
                 message: "PDF extraction completed successfully",
-                data: cleanedText
+                progress: 100,
+                detail: "All data extracted and processed",
+                data: cleanedText,
+                type: "text"
             })}\n\n`);
         }
 
